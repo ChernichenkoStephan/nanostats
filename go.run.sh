@@ -1,0 +1,1 @@
+make build && ./bin/nanostats -config conf.yaml
