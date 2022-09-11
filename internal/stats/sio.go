@@ -18,6 +18,24 @@ func OutputChats(names []string, counts []int, path string) error {
 	return output(parts, path)
 }
 
+// In process of fething channels are mmashed, do this function
+// sorts output array to input sequence form
+func SortLikeInputNames(stats []*Stats, names []string) {
+	for _, n := range names {
+		for i := 0; i < len(stats); i++ {
+			if n != "@"+stats[i].Username {
+				for j := 0; j < len(stats); j++ {
+					if n == "@"+stats[j].Username {
+						temp := stats[i]
+						stats[i] = stats[j]
+						stats[j] = temp
+					}
+				}
+			}
+		}
+	}
+}
+
 func OutputStats(stats []Stats, path string) error {
 	parts := make([]string, 0)
 
@@ -40,7 +58,7 @@ func output(ss []string, path string) error {
 		if os.IsNotExist(err) {
 			file, err := os.Create(path)
 			if err != nil {
-				log.Fatal(err)
+				return err
 			}
 			defer file.Close()
 		}

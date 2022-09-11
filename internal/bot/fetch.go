@@ -25,10 +25,10 @@ func idsToInputMessageClass(ids []int) []tg.InputMessageClass {
 	return imcs
 }
 
-func (b Bot) shot(username string, id int) (stats.Shot, error) {
+func (b Bot) shot(ctx context.Context, username string, id int) (stats.Shot, error) {
 	chat, err := b.botClient.ChatByUsername(username)
 	if err != nil {
-		return stats.Shot{}, fmt.Errorf("error during chat fetch, got %w", err)
+		return stats.Shot{}, fmt.Errorf("error during chat fetch, got %w\n", err)
 	}
 
 	chatPartis, err := b.botClient.Len(chat)
@@ -38,9 +38,9 @@ func (b Bot) shot(username string, id int) (stats.Shot, error) {
 
 	ids := b.validIDs(id)
 
-	tgmm, err := b.getFullMessages(username, ids)
+	tgmm, err := b.getFullMessages(ctx, username, ids)
 	if err != nil {
-		return stats.Shot{}, fmt.Errorf("error during messages fetch, got %w", err)
+		return stats.Shot{}, fmt.Errorf("error during messages fetch, got %w\n", err)
 	}
 
 	mm := make([]stats.Message, 0)
@@ -85,17 +85,12 @@ func (b Bot) validIDs(id int) (ids []int) {
 	return
 }
 
-func (b Bot) getFullMessages(username string, ids []int) (tg.MessageArray, error) {
-	if len(ids) == 0 {
-		return tg.MessageArray{}, fmt.Errorf("no messages ids")
-	}
-	b.lg.Infof("fetching messages for ids: %v", ids)
-	messages := tg.MessageArray{}
+func (b Bot) withMTPSession(f func(ctx context.Context) error) error {
 
 	// No graceful shutdown.
 	ctx := context.TODO()
 
-	err := b.mtpClient.Run(ctx, func(ctx context.Context) error {
+	return b.mtpClient.Run(ctx, func(ctx context.Context) error {
 		// Checking auth status.
 		status, err := b.mtpClient.Auth().Status(ctx)
 		if err != nil {
@@ -110,46 +105,48 @@ func (b Bot) getFullMessages(username string, ids []int) (tg.MessageArray, error
 			}
 		}
 
-		peerManager := peers.Options{
-			// Logger: b.lg,
-		}.Build(b.mtpClient.API())
-
-		p, err := peerManager.ResolveDomain(ctx, username)
-		if err != nil {
-			b.lg.Error(fmt.Sprintf("%v", err))
-			return err
-		}
-
-		if inputChannel, ok := peer.ToInputChannel(p.InputPeer()); ok {
-			IDs := idsToInputMessageClass(ids)
-
-			req := &tg.ChannelsGetMessagesRequest{
-				// Channel/supergroup
-				Channel: inputChannel, //InputChannelClass
-				// IDs of messages to get
-				ID: IDs, // []InputMessageClass
-			}
-
-			resp, err := b.mtpClient.API().ChannelsGetMessages(ctx, req)
-			if err != nil {
-				b.lg.Error(fmt.Sprintf("%v", err))
-				return err
-			}
-
-			var temp interface{} = resp
-			messages = temp.(*tg.MessagesChannelMessages).MapMessages().AsMessage()
-
-		} else {
-			return fmt.Errorf("not channel")
-		}
-
-		// All good, manually authenticated.
-		b.lg.Info("Done")
-
-		return nil
+		return f(ctx)
 	})
+}
+
+func (b Bot) getFullMessages(ctx context.Context, username string, ids []int) (tg.MessageArray, error) {
+	if len(ids) == 0 {
+		return tg.MessageArray{}, fmt.Errorf("no messages ids")
+	}
+	b.lg.Infof("fetching messages for ids: %v\n", ids)
+	var messages tg.MessageArray
+
+	peerManager := peers.Options{
+		// Logger: b.lg,
+	}.Build(b.mtpClient.API())
+
+	p, err := peerManager.ResolveDomain(ctx, username)
 	if err != nil {
 		return tg.MessageArray{}, err
 	}
+
+	if inputChannel, ok := peer.ToInputChannel(p.InputPeer()); ok {
+		IDs := idsToInputMessageClass(ids)
+
+		req := &tg.ChannelsGetMessagesRequest{
+			// Channel/supergroup
+			Channel: inputChannel, //InputChannelClass
+			// IDs of messages to get
+			ID: IDs, // []InputMessageClass
+		}
+
+		resp, err := b.mtpClient.API().ChannelsGetMessages(ctx, req)
+		if err != nil {
+			b.lg.Error(fmt.Sprintf("%v", err))
+			return tg.MessageArray{}, err
+		}
+
+		var temp interface{} = resp
+		messages = temp.(*tg.MessagesChannelMessages).MapMessages().AsMessage()
+
+	} else {
+		return tg.MessageArray{}, fmt.Errorf("not channel")
+	}
+
 	return messages, nil
 }

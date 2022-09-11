@@ -88,25 +88,23 @@ func initBot(cfg Config, lg *zap.SugaredLogger, repo *stats.IMRepository) (*bot.
 
 	var (
 		add = `/add`
-		del = `/delete`
+		del = `/del`
 		rep = `/report`
+		hlp = `/help`
 	)
 
 	botClient.Use(bot.Logging(lg))
 
 	botClient.Handle(`/start`, b.HandleStart)
-	botClient.Handle(add, b.HandleAddChat)
-	botClient.Handle(del, b.HandleDeleteChat)
+	botClient.Handle(add, b.HandleAddChats)
+	botClient.Handle(del, b.HandleDeleteChats)
 	botClient.Handle(rep, b.HandleGetStats)
+	botClient.Handle(hlp, b.HandleHelp)
 
 	commands := []tele.Command{
 		{
-			Text:        add,
-			Description: `Adds chat to stats fetching`,
-		},
-		{
-			Text:        del,
-			Description: `Deletes chat from stats fetching`,
+			Text:        hlp,
+			Description: `Prints commands list with usages`,
 		},
 		{
 			Text:        rep,

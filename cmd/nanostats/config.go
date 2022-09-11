@@ -20,6 +20,7 @@ type Config struct {
 	RequestDelay   int    `yaml:"requests-delay"`
 	MessagesLimit  int    `yaml:"messages-limit"`
 	OutputFileName string `yaml:"out-file-name"`
+	AdminID        int    `yaml:"admin-id"`
 }
 
 func readConfig(path string) (Config, error) {

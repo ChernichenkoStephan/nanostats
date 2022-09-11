@@ -1,6 +1,10 @@
 package stats
 
-import "sync"
+import (
+	"log"
+	"sort"
+	"sync"
+)
 
 type IMRepository struct {
 	mu    sync.Mutex
@@ -17,10 +21,19 @@ func (repo *IMRepository) GetAll() []Chat {
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
 
-	res := make([]Chat, len(repo.chats)-1)
-	for _, c := range repo.chats {
+	res := make([]Chat, 0)
+	for id, c := range repo.chats {
+		if id == 0 {
+			continue
+		}
 		res = append(res, c)
 	}
+
+	sort.Slice(res, func(i, j int) bool {
+		return res[i].ID < res[j].ID
+	})
+
+	log.Println(res)
 	return res
 }
 
@@ -32,12 +45,24 @@ func (repo *IMRepository) Get(ID int64) (Chat, bool) {
 	return c, ok
 }
 
-func (repo *IMRepository) GetWithTgID(tgID int64) (Chat, bool) {
+func (repo *IMRepository) GetWithTgID(id int64) (Chat, bool) {
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
 
 	for _, c := range repo.chats {
-		if c.TgID == tgID {
+		if c.TgID == id {
+			return c, true
+		}
+	}
+	return Chat{}, false
+}
+
+func (repo *IMRepository) GetWithUsername(username string) (Chat, bool) {
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+
+	for _, c := range repo.chats {
+		if c.Username == username {
 			return c, true
 		}
 	}
@@ -48,6 +73,9 @@ func (repo *IMRepository) Set(c Chat) {
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
 
+	if c.ID == 0 {
+		c.ID = int64(len(repo.chats) + 1)
+	}
 	repo.chats[c.ID] = c
 }
 
@@ -58,12 +86,12 @@ func (repo *IMRepository) Delete(c Chat) {
 	delete(repo.chats, c.ID)
 }
 
-func (repo *IMRepository) DeleteWithTgID(tgID int64) {
+func (repo *IMRepository) DeleteWithUsername(username string) {
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
 
 	for _, c := range repo.chats {
-		if c.TgID == tgID {
+		if c.Username == username {
 			repo.Delete(c)
 		}
 	}

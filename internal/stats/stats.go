@@ -36,24 +36,6 @@ func (s *Stats) Equals(another *Stats) bool {
 	return s.Username == another.Username
 }
 
-// In process of fething channels are mmashed, do this function
-// sorts output array to input sequence form
-func SortLikeInputNames(stats []*Stats, names []string) {
-	for _, n := range names {
-		for i := 0; i < len(stats); i++ {
-			if n != "@"+stats[i].Username {
-				for j := 0; j < len(stats); j++ {
-					if n == "@"+stats[j].Username {
-						temp := stats[i]
-						stats[i] = stats[j]
-						stats[j] = temp
-					}
-				}
-			}
-		}
-	}
-}
-
 func last[T any](slice []T) T {
 	return slice[len(slice)-1]
 }
@@ -61,14 +43,14 @@ func last[T any](slice []T) T {
 func GetStats(chats []Chat) (stats []Stats) {
 	stats = make([]Stats, 0)
 	for _, c := range chats {
-		if s, err := getChatStats(&c, 20); err == nil {
+		if s, err := getChatStats(c, 20); err == nil {
 			stats = append(stats, s)
 		}
 	}
 	return
 }
 
-func getChatStats(c *Chat, postsAmount int) (Stats, error) {
+func getChatStats(c Chat, postsAmount int) (Stats, error) {
 	if len(c.Shots) == 0 {
 		return Stats{}, errors.New(`empty shots list`)
 	}

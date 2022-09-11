@@ -1,10 +1,10 @@
 package bot
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/ChernichenkoStephan/nanostats/internal/stats"
+	"github.com/pkg/errors"
 
 	mtp "github.com/gotd/td/telegram"
 	"go.uber.org/zap"
@@ -44,7 +44,7 @@ type Options struct {
 func New(opt Options) *Bot {
 	var i int
 	for _, c := range opt.Repository.GetAll() {
-		opt.Lg.Infof("Fetching %v with %d", c.Username, c.LastPostID)
+		opt.Lg.Infof("Fetching %v with %d\n", c.Username, c.LastPostID)
 		cf, err := opt.BotClient.ChatByUsername(c.Username)
 		if err != nil {
 			opt.Lg.Errorln(err)
@@ -55,7 +55,7 @@ func New(opt Options) *Bot {
 		if cf.Title != `` {
 			c.Title = cf.Title
 		}
-		c.Type = fmt.Sprintf("%v", cf.Type)
+		c.Type = string(cf.Type)
 		opt.Repository.Set(c)
 
 		if i%opt.RequestsLimit == 0 {
@@ -77,4 +77,31 @@ func New(opt Options) *Bot {
 		lg:      opt.Lg,
 		outFile: opt.OutFile,
 	}
+}
+
+func (b Bot) addChat(username string) error {
+	b.lg.Infof("Fetching %v\n", username)
+	cf, err := b.botClient.ChatByUsername(username)
+	if err != nil {
+		return errors.Wrap(err, `error during fetching chat to add`)
+	}
+	b.lg.Infoln(cf)
+
+	title := cf.FirstName
+	if cf.Title != `` {
+		title = cf.Title
+	}
+
+	c := stats.Chat{
+		Title:    title,
+		TgID:     cf.ID,
+		Username: username,
+		Type:     string(cf.Type),
+	}
+
+	b.repo.Set(c)
+
+	b.lg.Infof("Added: %v", b.repo.GetAll())
+
+	return nil
 }
