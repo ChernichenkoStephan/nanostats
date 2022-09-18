@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ChernichenkoStephan/nanostats/internal/stats"
-	"github.com/gotd/td/telegram/message/peer"
-	"github.com/gotd/td/telegram/peers"
-	"github.com/gotd/td/tg"
+	"github.com/ChernichenkoStephan/nanostats/internal/tg"
+	mtptg "github.com/gotd/td/tg"
 )
+
+// func last[T any](slice []T) T {
+// 	return slice[len(slice)-1]
+// }
 
 const (
 	DEFAULT_POSTS_AMOUNT int = 20
@@ -17,18 +19,31 @@ const (
 	appHash                  = `22e40a55ffc270cd196e10578d1d92da`
 )
 
-func idsToInputMessageClass(ids []int) []tg.InputMessageClass {
-	imcs := make([]tg.InputMessageClass, 0)
-	for _, id := range ids {
-		imcs = append(imcs, &tg.InputMessageID{ID: id})
-	}
-	return imcs
-}
+// func (b Bot) stamp(ctx context.Context, chat tg.Chat, t tg.ShotType) (tg.Shot, error) {
+// 	c, err := b.botClient.ChatByUsername(chat.Username)
+// 	if err != nil {
+// 		return tg.Shot{}, fmt.Errorf("error during chat fetch, got %w\n", err)
+// 	}
 
-func (b Bot) shot(ctx context.Context, username string, id int) (stats.Shot, error) {
-	chat, err := b.botClient.ChatByUsername(username)
+// 	chatPartis, err := b.botClient.Len(c)
+// 	if err != nil {
+// 		b.lg.Info(err)
+// 	}
+
+// 	return tg.Shot{
+// 		Type:    t,
+// 		Amount:  chatPartis,
+// 		Created: time.Now(),
+// 	}, nil
+
+// }
+
+func (b Bot) update(ctx context.Context, c *tg.Chat, t tg.ShotType) error {
+	b.lg.Infof("updating %s len: %d", c.Username, len(c.Messages))
+
+	chat, err := b.botClient.ChatByUsername(c.Username)
 	if err != nil {
-		return stats.Shot{}, fmt.Errorf("error during chat fetch, got %w\n", err)
+		return fmt.Errorf("error during chat fetch, got %w", err)
 	}
 
 	chatPartis, err := b.botClient.Len(chat)
@@ -36,117 +51,78 @@ func (b Bot) shot(ctx context.Context, username string, id int) (stats.Shot, err
 		b.lg.Info(err)
 	}
 
-	ids := b.validIDs(id)
-
-	tgmm, err := b.getFullMessages(ctx, username, ids)
-	if err != nil {
-		return stats.Shot{}, fmt.Errorf("error during messages fetch, got %w\n", err)
+	c.TgID = chat.ID
+	c.Title = chat.FirstName
+	if chat.Title != `` {
+		c.Title = chat.Title
 	}
+	c.Type = string(chat.Type)
 
-	mm := make([]stats.Message, 0)
-	for _, tgm := range tgmm {
-
-		var frlen int
-		for _, rlen := range tgm.Reactions.Results {
-			frlen += rlen.Count
-		}
-
-		m := stats.Message{
-			ID:              tgm.ID,
-			Text:            tgm.Message,
-			Views:           tgm.Views,
-			ReactionsAmount: frlen,
-			CommentsLen:     tgm.Replies.Replies,
-			PostDate:        tgm.Date,
-		}
-
-		mm = append(mm, m)
-
-	}
-
-	return stats.Shot{
-		Messages:    mm,
-		Subscribers: chatPartis,
-		Created:     time.Now(),
-	}, nil
-
-}
-
-func (b Bot) validIDs(id int) (ids []int) {
-	ids = make([]int, 0)
-	start := 1
-	limit := id
-	if id > b.messageLimit {
-		start = id - b.messageLimit
-	}
-	for i := start; i <= limit; i++ {
-		ids = append(ids, i)
-	}
-	return
-}
-
-func (b Bot) withMTPSession(f func(ctx context.Context) error) error {
-
-	// No graceful shutdown.
-	ctx := context.TODO()
-
-	return b.mtpClient.Run(ctx, func(ctx context.Context) error {
-		// Checking auth status.
-		status, err := b.mtpClient.Auth().Status(ctx)
-		if err != nil {
-			return err
-		}
-		// Can be already authenticated if we have valid session in
-		// session storage.
-		if !status.Authorized {
-			// Otherwise, perform bot authentication.
-			if _, err := b.mtpClient.Auth().Bot(ctx, b.token); err != nil {
-				return err
-			}
-		}
-
-		return f(ctx)
+	c.Shots = append(c.Shots, tg.Shot{
+		Type:    t,
+		Amount:  chatPartis,
+		Created: time.Now(),
 	})
+
+	if len(c.Messages) == 0 {
+		// TODO: proper error handle
+		return nil
+	}
+
+	var start int
+	end := len(c.Messages) - 1
+	for i := end; i >= 0; i-- {
+		start = i
+
+		if c.Messages[i].Views != 0 {
+			break
+		}
+	}
+
+	emptyMessageIDs := make([]int, 0)
+	for i := start; i <= end; i++ {
+		emptyMessageIDs = append(emptyMessageIDs, c.Messages[i].ID)
+	}
+
+	tail := len(emptyMessageIDs) % 6
+	tgmm, err := b.mtpClient.getFullMessages(ctx, c.Username, emptyMessageIDs[0:tail])
+	if err != nil {
+		return fmt.Errorf("error during messages fetch, got %w", err)
+	}
+
+	for i := tail; i < len(emptyMessageIDs); i += 6 {
+
+		ctgmm, err := b.mtpClient.getFullMessages(ctx, c.Username, emptyMessageIDs[i:i+6])
+		if err != nil {
+			return fmt.Errorf("error during messages fetch, got %w", err)
+		}
+
+		tgmm = append(tgmm, ctgmm...)
+	}
+
+	fillMessages(c.Messages[start:end+1], tgmm)
+
+	return nil
 }
 
-func (b Bot) getFullMessages(ctx context.Context, username string, ids []int) (tg.MessageArray, error) {
-	if len(ids) == 0 {
-		return tg.MessageArray{}, fmt.Errorf("no messages ids")
-	}
-	b.lg.Infof("fetching messages for ids: %v\n", ids)
-	var messages tg.MessageArray
+func fillMessages(m2Fill []tg.Message, source mtptg.MessageArray) {
 
-	peerManager := peers.Options{
-		// Logger: b.lg,
-	}.Build(b.mtpClient.API())
+	for i := 0; i < len(m2Fill); i++ {
 
-	p, err := peerManager.ResolveDomain(ctx, username)
-	if err != nil {
-		return tg.MessageArray{}, err
-	}
+		// just for security
+		if m2Fill[i].ID == source[i].ID {
 
-	if inputChannel, ok := peer.ToInputChannel(p.InputPeer()); ok {
-		IDs := idsToInputMessageClass(ids)
+			var frlen int
+			for _, rlen := range source[i].Reactions.Results {
+				frlen += rlen.Count
+			}
 
-		req := &tg.ChannelsGetMessagesRequest{
-			// Channel/supergroup
-			Channel: inputChannel, //InputChannelClass
-			// IDs of messages to get
-			ID: IDs, // []InputMessageClass
+			m2Fill[i].Text = source[i].Message
+			m2Fill[i].Views = source[i].Views
+			m2Fill[i].Reactions = frlen
+			m2Fill[i].Comments = source[i].Replies.Replies
+			m2Fill[i].Created = time.Unix(int64(source[i].Date), 0)
+
 		}
-
-		resp, err := b.mtpClient.API().ChannelsGetMessages(ctx, req)
-		if err != nil {
-			b.lg.Error(fmt.Sprintf("%v", err))
-			return tg.MessageArray{}, err
-		}
-
-		var temp interface{} = resp
-		messages = temp.(*tg.MessagesChannelMessages).MapMessages().AsMessage()
-
-	} else {
-		return tg.MessageArray{}, fmt.Errorf("not channel")
 	}
-
-	return messages, nil
 }

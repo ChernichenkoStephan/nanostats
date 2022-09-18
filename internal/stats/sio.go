@@ -83,8 +83,6 @@ func output(ss []string, path string) error {
 		bytesWritten += newWritten
 	}
 
-	log.Printf("Bytes written: %d\n", bytesWritten)
-
 	writer.Flush()
 
 	return err

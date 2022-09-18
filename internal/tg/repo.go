@@ -1,7 +1,6 @@
-package stats
+package tg
 
 import (
-	"log"
 	"sort"
 	"sync"
 )
@@ -33,7 +32,6 @@ func (repo *IMRepository) GetAll() []Chat {
 		return res[i].ID < res[j].ID
 	})
 
-	log.Println(res)
 	return res
 }
 

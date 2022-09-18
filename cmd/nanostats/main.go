@@ -4,7 +4,7 @@ import (
 	"flag"
 	"log"
 
-	"github.com/ChernichenkoStephan/nanostats/internal/stats"
+	"github.com/ChernichenkoStephan/nanostats/internal/tg"
 	"go.uber.org/zap"
 )
 
@@ -28,7 +28,7 @@ func main() {
 	defer func() { _ = logger.Sync() }()
 	lg := logger.Sugar()
 
-	repo := stats.NewRepository()
+	repo := tg.NewRepository()
 	initRepository(cfg, repo)
 
 	b, err := initBot(cfg, lg, repo)
@@ -36,5 +36,6 @@ func main() {
 		log.Fatal(err)
 	}
 
+	lg.Infoln("Setup done.")
 	b.Start()
 }

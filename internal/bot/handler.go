@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"emperror.dev/errors"
+	"github.com/ChernichenkoStephan/nanostats/internal/tg"
 
 	"github.com/ChernichenkoStephan/nanostats/internal/stats"
 	tele "gopkg.in/telebot.v3"
@@ -16,6 +17,7 @@ import (
 var help string = "\\add @username0 @username1 | add chats to fetch list\n\\del @username0 @username1 delete chats from fetch list\n\\report print report"
 
 func (b Bot) Start() {
+	b.lg.Infoln(`Bot starting...`)
 	b.botClient.Start()
 }
 
@@ -56,7 +58,7 @@ func (b Bot) HandleDeleteChats(c tele.Context) error {
 	return c.Send(`Done`)
 }
 
-func (b Bot) HandleGetStats(c tele.Context) error {
+func (b Bot) HandleShot(c tele.Context) error {
 	fstRespErr := c.Send(`Fething...`)
 
 	ss := b.getStats()
@@ -66,25 +68,20 @@ func (b Bot) HandleGetStats(c tele.Context) error {
 		respond += fmt.Sprintf("%s\n", s)
 	}
 
+	secndRespErr := c.Send(respond)
+
+	return errors.Combine(fstRespErr, secndRespErr)
+}
+
+func (b Bot) HandleReport(c tele.Context) error {
+	fstRespErr := c.Send(`Fething...`)
+
+	ss := b.getStats()
+
 	err := b.makeReport(ss)
 	if err != nil {
 		b.lg.Errorf("got error during report making, got: %v", err)
 	}
-
-	secndRespErr := c.Send(respond)
-
-	/*
-		type Document struct {
-			File
-
-			// (Optional)
-			Thumbnail            *Photo `json:"thumb,omitempty"`
-			Caption              string `json:"caption,omitempty"`
-			MIME                 string `json:"mime_type"`
-			FileName             string `json:"file_name,omitempty"`
-			DisableTypeDetection bool   `json:"disable_content_type_detection,omitempty"`
-		}
-	*/
 
 	f := &tele.Document{
 		File:     tele.FromDisk(b.outFile),
@@ -96,8 +93,7 @@ func (b Bot) HandleGetStats(c tele.Context) error {
 		b.lg.Errorln(fileSendErr)
 	}
 
-	// return errors.Combine(fstRespErr, secndRespErr)
-	return errors.Combine(fstRespErr, secndRespErr, fileSendErr)
+	return errors.Combine(fstRespErr, fileSendErr)
 }
 
 func (b Bot) HandleStart(c tele.Context) error {
@@ -113,28 +109,21 @@ func (b Bot) HandleHelp(c tele.Context) error {
 func (b Bot) getStats() []stats.Stats {
 	cc := b.repo.GetAll()
 
-	b.lg.Infof("Fetching: %v\n", cc)
+	b.lg.Infof("Fetching channels")
 
-	err := b.withMTPSession(func(ctx context.Context) error {
+	ctx := context.Background()
+
+	err := b.mtpClient.withSession(ctx, func(ctx context.Context) error {
 
 		for i, c := range cc {
 
-			if c.Username == `` {
-				b.lg.Errorln(`empty username`)
-				continue
-			}
+			b.lg.Infof("Fetching: %d, %s, %s, %d\n", c.ID, c.Title, c.Username, len(c.Messages))
 
-			b.lg.Infof("Shoting: %d, %s, %s\n", c.ID, c.Title, c.Username)
-
-			s, err := b.shot(ctx, c.Username, c.LastPostID)
+			err := b.update(ctx, &cc[i], tg.MAMUAL)
 			if err != nil {
 				b.lg.Errorln(err)
 				continue
 			}
-
-			c.Shots = append(c.Shots, s)
-
-			cc[i] = c
 
 			if i%b.requestsLimit == 0 {
 				time.Sleep(time.Duration(b.requestsDelay))

@@ -1,53 +1,16 @@
 package main
 
 import (
-	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/ChernichenkoStephan/nanostats/internal/bot"
-	"github.com/ChernichenkoStephan/nanostats/internal/stats"
-	"github.com/gotd/td/session"
-	"github.com/gotd/td/telegram"
+	"github.com/ChernichenkoStephan/nanostats/internal/tg"
 	"go.uber.org/zap"
 	tele "gopkg.in/telebot.v3"
 )
 
-// memorySession implements in-memory session storage.
-// Goroutine-safe.
-type memorySession struct {
-	mux  sync.RWMutex
-	data []byte
-}
-
-// LoadSession loads session from memory.
-func (s *memorySession) LoadSession(context.Context) ([]byte, error) {
-	if s == nil {
-		return nil, session.ErrNotFound
-	}
-
-	s.mux.RLock()
-	defer s.mux.RUnlock()
-
-	if len(s.data) == 0 {
-		return nil, session.ErrNotFound
-	}
-
-	cpy := append([]byte(nil), s.data...)
-
-	return cpy, nil
-}
-
-// StoreSession stores session to memory.
-func (s *memorySession) StoreSession(ctx context.Context, data []byte) error {
-	s.mux.Lock()
-	s.data = data
-	s.mux.Unlock()
-	return nil
-}
-
-func initBot(cfg Config, lg *zap.SugaredLogger, repo *stats.IMRepository) (*bot.Bot, error) {
+func initBot(cfg Config, lg *zap.SugaredLogger, repo *tg.IMRepository) (*bot.Bot, error) {
 
 	pref := tele.Settings{
 		Token:  cfg.Token,
@@ -59,18 +22,10 @@ func initBot(cfg Config, lg *zap.SugaredLogger, repo *stats.IMRepository) (*bot.
 		return nil, fmt.Errorf("error during bot init, got %w", err)
 	}
 
-	// Using custom session storage.
-	// You can save session to database, e.g. Redis, MongoDB or postgres.
-	// See memorySession for implementation details.
-	sessionStorage := &memorySession{}
-
-	mtpClient := telegram.NewClient(cfg.AppID, cfg.APIHash, telegram.Options{
-		SessionStorage: sessionStorage,
-		Logger:         lg.Desugar(),
-	})
-
 	opts := bot.Options{
-		Token: cfg.Token,
+		Token:   cfg.Token,
+		AppID:   cfg.AppID,
+		APIHash: cfg.APIHash,
 
 		RequestsLimit: cfg.RequestLimit,
 		RequestsDelay: cfg.RequestDelay,
@@ -78,7 +33,6 @@ func initBot(cfg Config, lg *zap.SugaredLogger, repo *stats.IMRepository) (*bot.
 
 		Repository: repo,
 		BotClient:  botClient,
-		MTPClient:  mtpClient,
 
 		Lg:      lg,
 		OutFile: cfg.OutputFileName,
@@ -87,28 +41,43 @@ func initBot(cfg Config, lg *zap.SugaredLogger, repo *stats.IMRepository) (*bot.
 	b := bot.New(opts)
 
 	var (
-		add = `/add`
-		del = `/del`
-		rep = `/report`
-		hlp = `/help`
+		start  = `/start`
+		add    = `/add`
+		del    = `/del`
+		shot   = `/shot`
+		report = `/report`
+		help   = `/help`
 	)
 
 	botClient.Use(bot.Logging(lg))
 
-	botClient.Handle(`/start`, b.HandleStart)
+	botClient.Handle(start, b.HandleStart)
 	botClient.Handle(add, b.HandleAddChats)
 	botClient.Handle(del, b.HandleDeleteChats)
-	botClient.Handle(rep, b.HandleGetStats)
-	botClient.Handle(hlp, b.HandleHelp)
+	botClient.Handle(shot, b.HandleShot)
+	botClient.Handle(report, b.HandleReport)
+	botClient.Handle(help, b.HandleHelp)
 
 	commands := []tele.Command{
 		{
-			Text:        hlp,
+			Text:        help,
 			Description: `Prints commands list with usages`,
 		},
 		{
-			Text:        rep,
+			Text:        shot,
 			Description: `Returns chats stats`,
+		},
+		{
+			Text:        report,
+			Description: `Returns chats stats in file`,
+		},
+		{
+			Text:        add,
+			Description: `Adds chat to list`,
+		},
+		{
+			Text:        del,
+			Description: `Deletes chat from list`,
 		},
 	}
 

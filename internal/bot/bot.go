@@ -1,12 +1,12 @@
 package bot
 
 import (
+	"context"
 	"time"
 
-	"github.com/ChernichenkoStephan/nanostats/internal/stats"
+	"github.com/ChernichenkoStephan/nanostats/internal/tg"
 	"github.com/pkg/errors"
 
-	mtp "github.com/gotd/td/telegram"
 	"go.uber.org/zap"
 	tele "gopkg.in/telebot.v3"
 )
@@ -18,52 +18,36 @@ type Bot struct {
 	requestsDelay int
 	messageLimit  int
 
-	repo      *stats.IMRepository
+	repo      *tg.IMRepository
 	botClient *tele.Bot
-	mtpClient *mtp.Client
+	mtpClient *MTPClient
 
 	lg      *zap.SugaredLogger
 	outFile string
 }
 
 type Options struct {
-	Token string
+	Token   string
+	AppID   int
+	APIHash string
 
 	RequestsLimit int
 	RequestsDelay int
 	MessageLimit  int
 
-	Repository *stats.IMRepository
+	Repository *tg.IMRepository
 	BotClient  *tele.Bot
-	MTPClient  *mtp.Client
 
 	Lg      *zap.SugaredLogger
 	OutFile string
 }
 
-func New(opt Options) *Bot {
-	var i int
-	for _, c := range opt.Repository.GetAll() {
-		opt.Lg.Infof("Fetching %v with %d\n", c.Username, c.LastPostID)
-		cf, err := opt.BotClient.ChatByUsername(c.Username)
-		if err != nil {
-			opt.Lg.Errorln(err)
-			continue
-		}
-		c.TgID = cf.ID
-		c.Title = cf.FirstName
-		if cf.Title != `` {
-			c.Title = cf.Title
-		}
-		c.Type = string(cf.Type)
-		opt.Repository.Set(c)
+// func NewMTP(token string, appID int, apiHash string, log *zap.Logger) *MTPClient {
 
-		if i%opt.RequestsLimit == 0 {
-			time.Sleep(time.Duration(opt.RequestsDelay))
-		}
-		i++
-	}
-	return &Bot{
+func New(opt Options) *Bot {
+	mtp := NewMTP(opt.Token, opt.AppID, opt.APIHash, opt.Lg.Desugar())
+
+	b := &Bot{
 		token: opt.Token,
 
 		requestsLimit: opt.MessageLimit,
@@ -72,11 +56,35 @@ func New(opt Options) *Bot {
 
 		repo:      opt.Repository,
 		botClient: opt.BotClient,
-		mtpClient: opt.MTPClient,
+		mtpClient: mtp,
 
 		lg:      opt.Lg,
 		outFile: opt.OutFile,
 	}
+
+	var i int
+	ctx := context.Background()
+
+	b.mtpClient.withSession(ctx, func(ctx context.Context) error {
+		for _, c := range opt.Repository.GetAll() {
+
+			err := b.update(ctx, &c, tg.MAMUAL)
+			if err != nil {
+				b.lg.Errorln(err)
+				continue
+			}
+
+			b.repo.Set(c)
+
+			if i%opt.RequestsLimit == 0 {
+				time.Sleep(time.Duration(opt.RequestsDelay))
+			}
+			i++
+		}
+		return nil
+	})
+
+	return b
 }
 
 func (b Bot) addChat(username string) error {
@@ -92,7 +100,7 @@ func (b Bot) addChat(username string) error {
 		title = cf.Title
 	}
 
-	c := stats.Chat{
+	c := tg.Chat{
 		Title:    title,
 		TgID:     cf.ID,
 		Username: username,
